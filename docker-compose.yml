@@ -1,0 +1,141 @@
+version: '3.8'
+services:
+  cron:
+    image: nvqchau/magento2-cron
+    restart: always
+    depends_on:
+      - apache
+      - varnish
+    links:
+      - db
+      - cache
+      - sessions
+      - clusterdata
+      - apache
+      - varnish
+    volumes:
+      - type: bind
+        source: ./magento2
+        target: /var/www/html
+        consistency: delegated
+      - type: bind
+        source: ./varnish.secret
+        target: /varnish.secret
+        consistency: consistent
+      # Enable the next line if you want to add a custom php.ini
+      - ./php.ini:/usr/local/etc/php/conf.d/999-customphp.ini:delegated
+
+  ssl:
+    image: nvqchau/magento2-nginx-ssl
+    restart: always
+    depends_on:
+      - varnish
+    links:
+      - varnish
+    ports:
+      - "443:443"
+
+  varnish:
+    image: nvqchau/varnish
+    restart: always
+    ports:
+      - "80:80"
+      - "6082:6082"
+    depends_on:
+      - apache
+    links:
+      - apache
+    volumes:
+      - ./varnish.vcl:/etc/varnish/default.vcl:delegated
+      - ./varnish.secret:/etc/varnish/secret:delegated
+    environment:
+      - CACHE_SIZE=256M
+
+  apache:
+    image: nvqchau/magento2-php-apache
+    restart: always
+    depends_on:
+      - db
+      - cache
+      - sessions
+      - clusterdata
+    links:
+      - db
+      - cache
+      - sessions
+      - clusterdata
+    volumes:
+      - type: bind
+        source: ./magento2
+        target: /var/www/html
+        consistency: delegated
+      - ~/.composer/auth.json:/root/.composer/auth.json:delegated
+      # Enable the next line if you want to add a custom php.ini
+      - ./php.ini:/usr/local/etc/php/conf.d/999-customphp.ini:delegated
+
+  db:
+    image: percona
+    restart: always
+    ports:
+      - "3306:3306"
+    volumes:
+      - type: volume
+        source: db_data
+        target: /var/lib/mysql
+        consistency: delegated
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+
+  adminer:
+    image: adminer:fastcgi
+    restart: always
+    depends_on:
+      - db
+    links:
+      - db
+    volumes:
+      - ./adminer/php.ini:/usr/local/etc/php/conf.d/99-chaunvq-php.ini:ro
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+      ADMINER_DESIGN: nette
+      ADMINER_PLUGINS: tables-filter tinymce
+
+  adminerui:
+    image: nginx:latest
+    restart: always
+    depends_on:
+      - adminer
+    links:
+      - adminer
+    volumes:
+      - ./adminer/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./adminer/default.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8080:80"
+
+  cache:
+    image: nvqchau/redis-volatile
+    restart: always
+
+  clusterdata:
+    image: nvqchau/redis-volatile
+    restart: always
+
+  sessions:
+    image: redis
+    restart: always
+
+  portainer:
+    image: portainer/portainer-ce
+    command: -H unix:///var/run/docker.sock
+    restart: always
+    ports:
+      - "9000:9000"
+      - "8000:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
+volumes:
+  db_data:
+  portainer_data:
